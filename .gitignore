@@ -1,0 +1,50 @@
+# Secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE and operating system
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Application output
+logs/
+*.log
+
+# Airflow runtime
+airflow.cfg
+airflow.db
+webserver_config.py
+standalone_admin_password.txt
+
+# PostgreSQL local data
+postgres_data/
+
+# Source and rejected data
+data/raw/*
+data/rejected/*
+!data/raw/.gitkeep
+!data/rejected/.gitkeep
+
+# Temporary files
+tmp/
+temp/
+*.tmp
