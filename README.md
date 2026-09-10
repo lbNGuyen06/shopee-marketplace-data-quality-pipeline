@@ -1,24 +1,35 @@
-# Shopee Order Analytics Pipeline
+# Shopee Marketplace Data Quality Pipeline
 
-A reproducible batch data pipeline that extracts Shopee order records from a
-read-only SQL Server source, validates and loads them idempotently into
-PostgreSQL, and produces analytics-ready tables for sales, marketplace fees,
-cancellations, and fulfillment performance.
+A reproducible batch pipeline that incrementally extracts anonymized Shopee
+operational records, preserves immutable source snapshots, validates data
+quality, monitors identifier collisions, and publishes source-health metrics
+to PostgreSQL.
 
-> Project status: architecture and environment setup.
+The upstream dataset intentionally masks operational and personal identifiers.
+Because the masking does not preserve order-level uniqueness, this project does
+not report unique-order or customer-level metrics. Its primary purpose is
+reliable ingestion, observability, reconciliation, and privacy-aware data
+processing.
+
+> Project status: source profiling and data-contract design.
 
 ## Business Problem
 
-Marketplace order data is stored in a wide operational table containing order
-statuses, product information, lifecycle timestamps, shipping details, and
-platform fees. Querying this source directly makes reporting difficult to
-reproduce and increases the risk of inconsistent business definitions.
+Downstream analysts need to know whether marketplace records are complete,
+fresh, structurally valid, and safely reproducible before using them.
 
-This project prepares reliable datasets for three hypothetical users:
+The source contains anonymized operational identifiers. Profiling found that
+masked identifiers can collide, so treating them as unique order or order-item
+keys would produce unreliable analytics.
 
-- Operations managers monitoring fulfillment performance.
-- Finance analysts reconciling marketplace fees and settlement amounts.
-- Sales managers tracking order value and product performance.
+This pipeline addresses that risk by:
+
+- Preserving immutable source observations.
+- Detecting identifier collisions and exact duplicate records.
+- Monitoring freshness, null rates, schema changes, and batch volume.
+- Reconciling extracted, loaded, rejected, and duplicate records.
+- Preventing personally identifiable information from appearing in logs,
+  tests, and public documentation.
 
 ## Architecture
 
@@ -26,16 +37,21 @@ See [the architecture document](docs/architecture.md).
 
 ## Data Model
 
-The preliminary grain of the main fact table is one product or product variant
-within a Shopee order. This assumption will be validated during source
-profiling before the final schema is implemented.
+The source grain cannot be reliably identified as one unique order or order
+item because upstream masking creates identifier collisions.
 
-Planned layers:
+The pipeline therefore uses an append-only observation model:
 
-- `raw`: source-shaped records with ingestion metadata.
-- `staging`: cleaned, typed, deduplicated, and privacy-safe records.
-- `core`: reusable facts and dimensions.
-- `marts`: aggregated tables for business reporting.
+- `raw`: immutable source observations with batch metadata.
+- `staging`: technically standardized records and record fingerprints.
+- `monitoring`: pipeline runs, quality-test results, schema snapshots, and
+  identifier-collision measurements.
+- `marts`: source-health, freshness, status-distribution, and SKU-activity
+  summaries.
+
+A generated `ingestion_id` is used as the physical primary key. A SHA-256
+`source_row_hash` detects identical record content but is not presented as a
+business order identifier.
 
 ## Reliability and Data Quality
 
@@ -83,12 +99,15 @@ will use synthetic records only.
 
 ## Roadmap
 
-- [x] Define the business problem and initial architecture.
-- [ ] Profile the source dataset.
-- [ ] Implement raw incremental extraction.
-- [ ] Implement PostgreSQL loading.
-- [ ] Build staging, core, and mart models.
-- [ ] Add automated data-quality tests.
-- [ ] Containerize the runtime.
-- [ ] Orchestrate the pipeline with Airflow.
-- [ ] Add CI and final project documentation.
+- [x] Define the initial business problem and architecture.
+- [x] Profile the source dataset.
+- [x] Detect upstream identifier collisions.
+- [x] Redefine the project around append-only source observations.
+- [ ] Define the source record-hash contract.
+- [ ] Design ingestion and monitoring tables.
+- [ ] Run PostgreSQL locally with Docker.
+- [ ] Implement immutable batch ingestion.
+- [ ] Implement data-quality checks and reconciliation.
+- [ ] Implement overlapping incremental extraction.
+- [ ] Add Airflow orchestration.
+- [ ] Add CI and final portfolio documentation.

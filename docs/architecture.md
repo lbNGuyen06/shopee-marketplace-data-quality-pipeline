@@ -10,29 +10,29 @@ idempotently into PostgreSQL, and produces analytics-ready data marts.
 
 ```mermaid
 flowchart LR
-    A[Xóm Data SQL Server] -->|Incremental extract| B[Python Extractor]
-    B --> C[Raw Batch Files]
-    C --> D[Schema and Quality Validation]
-    D -->|Valid records| E[PostgreSQL Raw Layer]
-    D -->|Invalid records| F[Rejected Records]
-    E --> G[Staging Transformations]
-    G --> H[Core Fact and Dimensions]
-    H --> I[Analytics Marts]
-    J[Apache Airflow] -. Orchestrates .-> B
-    J -. Orchestrates .-> D
-    J -. Orchestrates .-> G
-    J -. Runs tests .-> I
+    A[Xóm Data SQL Server] -->|synced_at overlap window| B[Python Extractor]
+    B --> C[Immutable Raw Batch]
+    C --> D[Schema Validation]
+    D --> E[Record Fingerprinting]
+    E -->|Valid observations| F[PostgreSQL Raw]
+    D -->|Invalid observations| G[Rejected Records]
+    F --> H[Standardized Records]
+    H --> I[Quality and Collision Checks]
+    I --> J[Monitoring Marts]
+    K[Apache Airflow] -. Orchestrates .-> B
+    K -. Runs checks .-> I
+    K -. Commits watermark after success .-> J
 ```
 
 ## Data layers
 
-| Layer          | Purpose                                                                 |
-| -------------- | ----------------------------------------------------------------------- |
-| Raw files      | Preserve source batches for replay and debugging                        |
-| PostgreSQL raw | Store source-shaped records with ingestion metadata                     |
-| Staging        | Normalize types, statuses, timestamps, and sensitive fields             |
-| Core           | Represent reusable business entities and order-item facts               |
-| Marts          | Provide aggregated data for sales, fees, cancellations, and fulfillment |
+| Layer          | Grain                                        | Purpose                                                   |
+| -------------- | -------------------------------------------- | --------------------------------------------------------- |
+| Raw files      | One extracted batch                          | Preserve the source response for replay                   |
+| PostgreSQL raw | One observed source record per batch         | Store immutable observations and ingestion metadata       |
+| Staging        | One distinct record fingerprint              | Standardize types and remove exact re-ingestion           |
+| Monitoring     | One test result or pipeline event            | Record quality, reconciliation, freshness, and collisions |
+| Marts          | One metric per date and monitoring dimension | Support operational source-health reporting               |
 
 ## Reliability requirements
 
@@ -48,3 +48,14 @@ flowchart LR
 - The dataset may not receive continuous updates.
 - Historical dates will be replayed as batches to demonstrate backfills.
 - The project is designed for learning and portfolio evaluation, not production use.
+
+## System invariants
+
+- Masked source identifiers are never treated as unique keys.
+- Raw observations are immutable.
+- Reprocessing a batch does not duplicate standardized records.
+- Every loaded or rejected record belongs to a known batch.
+- Extracted row count equals loaded, duplicate, and rejected row counts.
+- The watermark advances only after successful reconciliation.
+- Record fingerprints identify content, not business entities.
+- No unique-order or unique-customer metric is published.
