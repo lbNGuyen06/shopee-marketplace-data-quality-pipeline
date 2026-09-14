@@ -76,7 +76,28 @@ The pipeline will implement:
 
 ## Local Setup
 
-Setup instructions will be added after the Docker environment is implemented.
+Prerequisites: Docker Desktop with Docker Compose.
+
+1. Copy `.env.example` to `.env` and set local credentials.
+2. Start PostgreSQL and wait for its health check:
+
+   ```shell
+   docker compose up -d --wait postgres
+   ```
+
+3. Verify the initialized schemas and tables:
+
+   ```shell
+   docker compose exec -T postgres sh -c 'psql \
+     -v ON_ERROR_STOP=1 \
+     -U "$POSTGRES_USER" \
+     -d "$POSTGRES_DB" \
+     -f /workspace/sql/tests/postgres_smoke_test.sql'
+   ```
+
+The SQL files in `sql/ddl` run automatically only when the PostgreSQL data
+volume is first initialized. Apply later schema changes through explicit,
+versioned migrations rather than recreating a populated volume.
 
 ## Challenges and Solutions
 
