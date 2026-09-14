@@ -57,7 +57,7 @@ business order identifier.
 
 The pipeline will implement:
 
-- Incremental extraction using source update timestamps.
+- Incremental extraction using `synced_at` with a configurable overlap window.
 - Idempotent loading and safe reprocessing.
 - Schema, null, uniqueness, range, and lifecycle validation.
 - Source-to-target row-count reconciliation.
@@ -93,8 +93,10 @@ will use synthetic records only.
 ## Limitations
 
 - The source is a limited sample rather than a live Shopee API.
+- The latest profiled snapshot contains 25,546 records; profiling results remain
+  snapshot-specific because the upstream table changes over time.
 - Historical data may be replayed to demonstrate incremental and backfill runs.
-- The system is intentionally sized for 5,000 records and does not require
+- The system is intentionally sized for 25,546 records and does not require
   distributed processing technologies such as Spark or Kafka.
 
 ## Roadmap

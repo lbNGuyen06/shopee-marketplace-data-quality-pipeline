@@ -1,10 +1,17 @@
-# Shopee Order Analytics Pipeline Architecture
+# Shopee Marketplace Data Quality Pipeline Architecture
 
 ## System context
 
-The pipeline extracts Shopee order records from the read-only Xóm Data SQL
-Server source. It preserves a raw copy, validates the records, loads them
-idempotently into PostgreSQL, and produces analytics-ready data marts.
+The pipeline extracts marketplace observations from the read-only Xóm Data SQL
+Server source. It preserves immutable batches, validates and fingerprints the
+records, loads them into PostgreSQL, and publishes aggregate source-health
+metrics. Because masking creates identifier collisions, the system does not
+claim order-level or customer-level analytics.
+
+The processing scope is append-only: every received source observation remains
+in the raw layer with its batch lineage. Exact content seen through the
+incremental overlap window is deduplicated only in staging; raw history is
+never updated or deleted to manufacture a business entity view.
 
 ## Data flow
 
@@ -32,7 +39,7 @@ flowchart LR
 | PostgreSQL raw | One observed source record per batch         | Store immutable observations and ingestion metadata       |
 | Staging        | One distinct record fingerprint              | Standardize types and remove exact re-ingestion           |
 | Monitoring     | One test result or pipeline event            | Record quality, reconciliation, freshness, and collisions |
-| Marts          | One metric per date and monitoring dimension | Support operational source-health reporting               |
+| Marts          | One metric per date and monitoring dimension | Support aggregate operational source-health reporting     |
 
 ## Reliability requirements
 
@@ -44,7 +51,8 @@ flowchart LR
 
 ## Current constraints
 
-- The source contains a sample of 5,000 Shopee records.
+- The latest profiled source snapshot contains 25,546 records.
+- Profiling measurements are snapshot-specific because the source changes.
 - The dataset may not receive continuous updates.
 - Historical dates will be replayed as batches to demonstrate backfills.
 - The project is designed for learning and portfolio evaluation, not production use.
@@ -53,6 +61,7 @@ flowchart LR
 
 - Masked source identifiers are never treated as unique keys.
 - Raw observations are immutable.
+- Append-only raw storage preserves repeated observations and batch lineage.
 - Reprocessing a batch does not duplicate standardized records.
 - Every loaded or rejected record belongs to a known batch.
 - Extracted row count equals loaded, duplicate, and rejected row counts.
