@@ -6,6 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "shopee-marketplace-data-quality"
 version = "0.1.0"
 requires-python = ">=3.9"
+dependencies = [
+    "psycopg[binary]>=3,<4",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
