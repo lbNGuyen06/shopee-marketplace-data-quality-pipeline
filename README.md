@@ -126,9 +126,9 @@ will use synthetic records only.
 - [x] Profile the source dataset.
 - [x] Detect upstream identifier collisions.
 - [x] Redefine the project around append-only source observations.
-- [ ] Define the source record-hash contract.
-- [ ] Design ingestion and monitoring tables.
-- [ ] Run PostgreSQL locally with Docker.
+- [x] Define the source record-hash contract.
+- [x] Design ingestion and monitoring tables.
+- [x] Run PostgreSQL locally with Docker.
 - [ ] Implement immutable batch ingestion.
 - [ ] Implement data-quality checks and reconciliation.
 - [ ] Implement overlapping incremental extraction.

@@ -48,7 +48,8 @@ BEGIN
             ('pipeline_runs_nonnegative_counts_check'),
             ('pipeline_runs_reconciliation_check'),
             ('pipeline_runs_watermark_check'),
-            ('pipeline_runs_success_check')
+            ('pipeline_runs_success_check'),
+            ('pipeline_runs_hash_contract_version_check')
     ) AS expected(constraint_name)
     WHERE NOT EXISTS (
         SELECT 1
