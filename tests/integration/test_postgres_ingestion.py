@@ -9,6 +9,10 @@ from shopee_quality.ingestion import (
     insert_raw_observation,
     start_pipeline_run,
 )
+from shopee_quality.quality import (
+    evaluate_batch_reconciliation,
+    record_quality_test_result,
+)
 
 
 def test_postgres_ingestion_transaction() -> None:
@@ -35,6 +39,19 @@ def test_postgres_ingestion_transaction() -> None:
             source_row_hash="a" * 64,
             synced_at=watermark,
             source_record={"pkId": "integration-test"},
+        )
+
+        quality_result = evaluate_batch_reconciliation(
+            extracted_count=1,
+            loaded_count=1,
+            duplicate_count=0,
+            rejected_count=0,
+        )
+
+        record_quality_test_result(
+            connection=connection,
+            batch_id=batch_id,
+            **quality_result,
         )
 
         complete_pipeline_run(
@@ -66,8 +83,22 @@ def test_postgres_ingestion_transaction() -> None:
             (batch_id,),
         ).fetchone()[0]
 
+        recorded_quality = connection.execute(
+            """
+            SELECT status, affected_row_count
+            FROM monitoring.quality_test_results
+            WHERE batch_id = %s
+              AND rule_code = %s
+            """,
+            (
+                batch_id,
+                "batch_row_count_reconciliation",
+            ),
+        ).fetchone()
+
         assert run == ("succeeded", watermark, 1)
         assert raw_count == 1
+        assert recorded_quality == ("passed", 0)
     finally:
         connection.rollback()
         connection.close()

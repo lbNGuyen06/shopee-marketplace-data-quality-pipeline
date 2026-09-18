@@ -129,7 +129,7 @@ will use synthetic records only.
 - [x] Define the source record-hash contract.
 - [x] Design ingestion and monitoring tables.
 - [x] Run PostgreSQL locally with Docker.
-- [ ] Implement immutable batch ingestion.
+- [x] Implement immutable batch ingestion.
 - [ ] Implement data-quality checks and reconciliation.
 - [ ] Implement overlapping incremental extraction.
 - [ ] Add Airflow orchestration.
