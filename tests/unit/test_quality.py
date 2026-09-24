@@ -197,3 +197,54 @@ def test_record_quality_test_result_rejects_non_mapping_details() -> None:
         )
 
     connection.execute.assert_not_called()
+
+
+def test_count_batch_exact_duplicates_reads_raw_batch() -> None:
+    connection = Mock()
+    connection.execute.return_value.fetchone.return_value = (2,)
+    batch_id = UUID("11111111-1111-1111-1111-111111111111")
+
+    actual = quality.count_batch_exact_duplicates(
+        connection=connection,
+        batch_id=batch_id,
+    )
+
+    assert actual == 2
+    sql, parameters = connection.execute.call_args.args
+    assert "count(DISTINCT source_row_hash)" in sql
+    assert "FROM raw.shopee_observations" in sql
+    assert parameters == (batch_id,)
+    connection.commit.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("duplicate_count", "expected_status"),
+    [(0, "passed"), (2, "failed")],
+)
+def test_evaluate_batch_exact_duplicates(
+    duplicate_count: int,
+    expected_status: str,
+) -> None:
+    result = quality.evaluate_batch_exact_duplicates(duplicate_count)
+
+    assert result == {
+        "rule_code": "batch_exact_duplicate_count",
+        "severity": "warning",
+        "status": expected_status,
+        "observed_value": Decimal(duplicate_count),
+        "threshold_value": Decimal(0),
+        "affected_row_count": duplicate_count,
+        "details": {
+            "duplicate_definition": (
+                "repeated source_row_hash within one raw batch"
+            ),
+        },
+    }
+
+
+@pytest.mark.parametrize("duplicate_count", [-1, True, 1.5])
+def test_evaluate_batch_exact_duplicates_rejects_invalid_count(
+    duplicate_count,
+) -> None:
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        quality.evaluate_batch_exact_duplicates(duplicate_count)

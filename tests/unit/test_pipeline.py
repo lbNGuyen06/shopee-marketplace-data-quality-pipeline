@@ -54,6 +54,7 @@ def build_connections(rows):
     source_connection.execute.return_value.fetchall.return_value = rows
     destination_connection = MagicMock()
     destination_connection.execute.return_value.rowcount = 1
+    destination_connection.execute.return_value.fetchone.return_value = (0,)
     return source_connection, destination_connection
 
 

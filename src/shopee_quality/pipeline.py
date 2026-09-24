@@ -16,6 +16,8 @@ from shopee_quality.ingestion import (
     start_pipeline_run,
 )
 from shopee_quality.quality import (
+    count_batch_exact_duplicates,
+    evaluate_batch_exact_duplicates,
     evaluate_batch_reconciliation,
     record_quality_test_result,
 )
@@ -107,6 +109,19 @@ def ingest_extraction_window(
                 synced_at=synced_at,
                 standardized_record=source_record,
             )
+
+        exact_duplicate_count = count_batch_exact_duplicates(
+            connection=destination_connection,
+            batch_id=resolved_batch_id,
+        )
+        duplicate_quality_result = evaluate_batch_exact_duplicates(
+            exact_duplicate_count
+        )
+        record_quality_test_result(
+            connection=destination_connection,
+            batch_id=resolved_batch_id,
+            **duplicate_quality_result,
+        )
 
         extracted_count = len(source_rows)
         quality_result = evaluate_batch_reconciliation(

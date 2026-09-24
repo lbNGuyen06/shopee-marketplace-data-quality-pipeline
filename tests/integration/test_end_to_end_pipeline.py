@@ -15,7 +15,7 @@ from shopee_quality.pipeline import (
 )
 
 
-TEST_DATABASE = "shopee_quality_migration_test"
+TEST_DATABASE = "shopee_quality_e2e_test"
 
 
 def test_end_to_end_pipeline() -> None:
@@ -98,6 +98,15 @@ def test_end_to_end_pipeline() -> None:
             """,
             (batch_id,),
         ).fetchone()
+        quality_results = destination_connection.execute(
+            """
+            SELECT rule_code, severity, status, affected_row_count
+            FROM monitoring.quality_test_results
+            WHERE batch_id = %s
+            ORDER BY rule_code
+            """,
+            (batch_id,),
+        ).fetchall()
 
         assert result.batch_id == batch_id
         assert result.extracted_count > 0
@@ -111,6 +120,20 @@ def test_end_to_end_pipeline() -> None:
         )
         assert raw_count == result.loaded_count
         assert raw_contract == (64, 84)
+        assert quality_results == [
+            (
+                "batch_exact_duplicate_count",
+                "warning",
+                "passed",
+                0,
+            ),
+            (
+                "batch_row_count_reconciliation",
+                "error",
+                "passed",
+                0,
+            ),
+        ]
     finally:
         destination_connection.rollback()
         destination_connection.execute(

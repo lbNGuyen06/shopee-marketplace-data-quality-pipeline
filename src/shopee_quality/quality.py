@@ -19,6 +19,12 @@ INSERT INTO monitoring.quality_test_results (
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
 """
 
+BATCH_EXACT_DUPLICATE_COUNT_SQL = """
+SELECT count(*) - count(DISTINCT source_row_hash)
+FROM raw.shopee_observations
+WHERE batch_id = %s
+"""
+
 VALID_SEVERITIES = frozenset(
     {"info", "warning", "error"}
 )
@@ -129,5 +135,38 @@ def evaluate_batch_reconciliation(
             "duplicate_count": duplicate_count,
             "rejected_count": rejected_count,
             "accounted_count": accounted_count,
+        },
+    }
+
+
+def count_batch_exact_duplicates(connection, batch_id: UUID) -> int:
+    row = connection.execute(
+        BATCH_EXACT_DUPLICATE_COUNT_SQL,
+        (batch_id,),
+    ).fetchone()
+    return row[0]
+
+
+def evaluate_batch_exact_duplicates(duplicate_count: int) -> dict:
+    if (
+        isinstance(duplicate_count, bool)
+        or not isinstance(duplicate_count, int)
+        or duplicate_count < 0
+    ):
+        raise ValueError(
+            "duplicate_count must be a nonnegative integer"
+        )
+
+    return {
+        "rule_code": "batch_exact_duplicate_count",
+        "severity": "warning",
+        "status": "passed" if duplicate_count == 0 else "failed",
+        "observed_value": Decimal(duplicate_count),
+        "threshold_value": Decimal(0),
+        "affected_row_count": duplicate_count,
+        "details": {
+            "duplicate_definition": (
+                "repeated source_row_hash within one raw batch"
+            ),
         },
     }
