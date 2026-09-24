@@ -133,6 +133,12 @@ def test_end_to_end_pipeline() -> None:
                 "passed",
                 0,
             ),
+            (
+                "source_freshness_lag_minutes",
+                "warning",
+                "failed",
+                1,
+            ),
         ]
     finally:
         destination_connection.rollback()

@@ -19,6 +19,7 @@ from shopee_quality.quality import (
     count_batch_exact_duplicates,
     evaluate_batch_exact_duplicates,
     evaluate_batch_reconciliation,
+    evaluate_source_freshness,
     record_quality_test_result,
 )
 from shopee_quality.staging import upsert_staging_record
@@ -60,6 +61,7 @@ def ingest_extraction_window(
     window: ExtractionWindow,
     batch_id: Optional[UUID] = None,
     clock: Callable[[], datetime] = utc_now,
+    freshness_threshold_minutes: int = 1440,
 ) -> BatchResult:
     if not isinstance(source_name, str) or not source_name.strip():
         raise ValueError("source_name must be a non-empty string")
@@ -121,6 +123,16 @@ def ingest_extraction_window(
             connection=destination_connection,
             batch_id=resolved_batch_id,
             **duplicate_quality_result,
+        )
+        freshness_result = evaluate_source_freshness(
+            extraction_started_at=extraction_started_at,
+            source_max_synced_at=window.end_synced_at,
+            threshold_minutes=freshness_threshold_minutes,
+        )
+        record_quality_test_result(
+            connection=destination_connection,
+            batch_id=resolved_batch_id,
+            **freshness_result,
         )
 
         extracted_count = len(source_rows)

@@ -75,6 +75,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=int(os.environ.get("INCREMENTAL_OVERLAP_MINUTES", "10")),
     )
+    run_parser.add_argument(
+        "--freshness-threshold-minutes",
+        type=int,
+        default=int(
+            os.environ.get(
+                "SOURCE_FRESHNESS_THRESHOLD_MINUTES",
+                "1440",
+            )
+        ),
+    )
     return parser
 
 
@@ -112,6 +122,9 @@ def run_batch(args, output=print):
             destination_connection=destination_connection,
             source_name=SOURCE_NAME,
             window=window,
+            freshness_threshold_minutes=(
+                args.freshness_threshold_minutes
+            ),
         )
 
         output(f"batch_id={result.batch_id}")

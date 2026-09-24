@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import Mock
 from uuid import UUID
@@ -248,3 +249,74 @@ def test_evaluate_batch_exact_duplicates_rejects_invalid_count(
 ) -> None:
     with pytest.raises(ValueError, match="nonnegative integer"):
         quality.evaluate_batch_exact_duplicates(duplicate_count)
+
+
+@pytest.mark.parametrize(
+    ("lag_minutes", "expected_status", "affected_row_count"),
+    [
+        (60, "passed", 0),
+        (1440, "passed", 0),
+        (1441, "failed", 1),
+    ],
+)
+def test_evaluate_source_freshness(
+    lag_minutes: int,
+    expected_status: str,
+    affected_row_count: int,
+) -> None:
+    extraction_started_at = datetime(
+        2026, 9, 24, 10, 0, tzinfo=timezone.utc
+    )
+    source_max_synced_at = extraction_started_at - timedelta(
+        minutes=lag_minutes
+    )
+
+    result = quality.evaluate_source_freshness(
+        extraction_started_at=extraction_started_at,
+        source_max_synced_at=source_max_synced_at,
+        threshold_minutes=1440,
+    )
+
+    assert result["rule_code"] == "source_freshness_lag_minutes"
+    assert result["severity"] == "warning"
+    assert result["status"] == expected_status
+    assert result["observed_value"] == Decimal(lag_minutes)
+    assert result["threshold_value"] == Decimal(1440)
+    assert result["affected_row_count"] == affected_row_count
+
+
+@pytest.mark.parametrize(
+    ("started_at", "source_max", "threshold", "message"),
+    [
+        (
+            datetime(2026, 9, 24, 10, 0),
+            datetime(2026, 9, 24, 9, 0, tzinfo=timezone.utc),
+            1440,
+            "extraction_started_at",
+        ),
+        (
+            datetime(2026, 9, 24, 10, 0, tzinfo=timezone.utc),
+            datetime(2026, 9, 24, 9, 0),
+            1440,
+            "source_max_synced_at",
+        ),
+        (
+            datetime(2026, 9, 24, 10, 0, tzinfo=timezone.utc),
+            datetime(2026, 9, 24, 9, 0, tzinfo=timezone.utc),
+            -1,
+            "threshold_minutes",
+        ),
+    ],
+)
+def test_evaluate_source_freshness_rejects_invalid_input(
+    started_at,
+    source_max,
+    threshold,
+    message,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        quality.evaluate_source_freshness(
+            extraction_started_at=started_at,
+            source_max_synced_at=source_max,
+            threshold_minutes=threshold,
+        )

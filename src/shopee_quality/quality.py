@@ -1,3 +1,4 @@
+from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -168,5 +169,56 @@ def evaluate_batch_exact_duplicates(duplicate_count: int) -> dict:
             "duplicate_definition": (
                 "repeated source_row_hash within one raw batch"
             ),
+        },
+    }
+
+
+def evaluate_source_freshness(
+    extraction_started_at: datetime,
+    source_max_synced_at: datetime,
+    threshold_minutes: int,
+) -> dict:
+    for field_name, value in (
+        ("extraction_started_at", extraction_started_at),
+        ("source_max_synced_at", source_max_synced_at),
+    ):
+        if (
+            not isinstance(value, datetime)
+            or value.tzinfo is None
+            or value.utcoffset() is None
+        ):
+            raise ValueError(
+                f"{field_name} must be a timezone-aware datetime"
+            )
+
+    if (
+        isinstance(threshold_minutes, bool)
+        or not isinstance(threshold_minutes, int)
+        or threshold_minutes < 0
+    ):
+        raise ValueError(
+            "threshold_minutes must be a nonnegative integer"
+        )
+
+    lag_minutes = Decimal(
+        str(
+            (
+                extraction_started_at - source_max_synced_at
+            ).total_seconds()
+        )
+    ) / Decimal(60)
+    threshold = Decimal(threshold_minutes)
+    passed = lag_minutes <= threshold
+
+    return {
+        "rule_code": "source_freshness_lag_minutes",
+        "severity": "warning",
+        "status": "passed" if passed else "failed",
+        "observed_value": lag_minutes,
+        "threshold_value": threshold,
+        "affected_row_count": 0 if passed else 1,
+        "details": {
+            "extraction_started_at": extraction_started_at.isoformat(),
+            "source_max_synced_at": source_max_synced_at.isoformat(),
         },
     }

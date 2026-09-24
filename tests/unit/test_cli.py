@@ -104,6 +104,7 @@ def test_run_batch_validates_schema_and_closes_connections(
                 2026, 1, 1, tzinfo=timezone.utc
             ),
             overlap_minutes=10,
+            freshness_threshold_minutes=1440,
         ),
         output=output,
     )
@@ -152,6 +153,7 @@ def test_run_batch_stops_on_schema_drift_and_closes_connections(
                     2026, 1, 1, tzinfo=timezone.utc
                 ),
                 overlap_minutes=10,
+                freshness_threshold_minutes=1440,
             )
         )
 
