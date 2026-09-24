@@ -26,6 +26,18 @@ FROM raw.shopee_observations
 WHERE batch_id = %s
 """
 
+BATCH_SYNCED_AT_WINDOW_VIOLATION_COUNT_SQL = """
+SELECT count(*)
+FROM raw.shopee_observations AS observation
+JOIN monitoring.pipeline_runs AS run
+  ON run.batch_id = observation.batch_id
+WHERE observation.batch_id = %s
+  AND (
+      observation.synced_at < run.overlap_start_synced_at
+      OR observation.synced_at > run.extraction_end_synced_at
+  )
+"""
+
 VALID_SEVERITIES = frozenset(
     {"info", "warning", "error"}
 )
@@ -220,5 +232,44 @@ def evaluate_source_freshness(
         "details": {
             "extraction_started_at": extraction_started_at.isoformat(),
             "source_max_synced_at": source_max_synced_at.isoformat(),
+        },
+    }
+
+
+def count_batch_synced_at_window_violations(
+    connection,
+    batch_id: UUID,
+) -> int:
+    row = connection.execute(
+        BATCH_SYNCED_AT_WINDOW_VIOLATION_COUNT_SQL,
+        (batch_id,),
+    ).fetchone()
+    return row[0]
+
+
+def evaluate_batch_synced_at_window_violations(
+    violation_count: int,
+) -> dict:
+    if (
+        isinstance(violation_count, bool)
+        or not isinstance(violation_count, int)
+        or violation_count < 0
+    ):
+        raise ValueError(
+            "violation_count must be a nonnegative integer"
+        )
+
+    return {
+        "rule_code": "batch_synced_at_window_violation_count",
+        "severity": "error",
+        "status": "passed" if violation_count == 0 else "failed",
+        "observed_value": Decimal(violation_count),
+        "threshold_value": Decimal(0),
+        "affected_row_count": violation_count,
+        "details": {
+            "valid_range": (
+                "overlap_start_synced_at <= synced_at "
+                "<= extraction_end_synced_at"
+            ),
         },
     }

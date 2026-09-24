@@ -320,3 +320,52 @@ def test_evaluate_source_freshness_rejects_invalid_input(
             source_max_synced_at=source_max,
             threshold_minutes=threshold,
         )
+
+
+def test_count_batch_synced_at_window_violations() -> None:
+    connection = Mock()
+    connection.execute.return_value.fetchone.return_value = (2,)
+    batch_id = UUID("11111111-1111-1111-1111-111111111111")
+
+    actual = quality.count_batch_synced_at_window_violations(
+        connection=connection,
+        batch_id=batch_id,
+    )
+
+    assert actual == 2
+    sql, parameters = connection.execute.call_args.args
+    assert "observation.synced_at <" in sql
+    assert "observation.synced_at >" in sql
+    assert parameters == (batch_id,)
+
+
+@pytest.mark.parametrize(
+    ("violation_count", "expected_status"),
+    [(0, "passed"), (2, "failed")],
+)
+def test_evaluate_batch_synced_at_window_violations(
+    violation_count: int,
+    expected_status: str,
+) -> None:
+    result = quality.evaluate_batch_synced_at_window_violations(
+        violation_count
+    )
+
+    assert result["rule_code"] == (
+        "batch_synced_at_window_violation_count"
+    )
+    assert result["severity"] == "error"
+    assert result["status"] == expected_status
+    assert result["observed_value"] == Decimal(violation_count)
+    assert result["threshold_value"] == Decimal(0)
+    assert result["affected_row_count"] == violation_count
+
+
+@pytest.mark.parametrize("violation_count", [-1, True, 1.5])
+def test_evaluate_window_violations_rejects_invalid_count(
+    violation_count,
+) -> None:
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        quality.evaluate_batch_synced_at_window_violations(
+            violation_count
+        )

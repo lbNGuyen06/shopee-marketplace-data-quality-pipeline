@@ -1,21 +1,49 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import psycopg
 import pyodbc
+import pytest
 
 from shopee_quality.database import (
     postgres_connection_kwargs,
     sqlserver_connection_string,
 )
 from shopee_quality.incremental import ExtractionWindow
+from shopee_quality.hashing import (
+    CANONICAL_FIELDS,
+    DATETIME_FIELDS,
+    DECIMAL_FIELDS,
+    INTEGER_FIELDS,
+)
 from shopee_quality.pipeline import (
+    QualityGateError,
     ingest_extraction_window,
     parse_source_synced_at,
 )
 
 
 TEST_DATABASE = "shopee_quality_e2e_test"
+
+
+def build_source_row(synced_at: str) -> tuple:
+    values = []
+
+    for field_name in CANONICAL_FIELDS:
+        if field_name == "synced_at":
+            values.append(synced_at)
+        elif field_name in DATETIME_FIELDS:
+            values.append("2026-09-23T09:55:00.0000000")
+        elif field_name in DECIMAL_FIELDS:
+            values.append(Decimal("100.00"))
+        elif field_name in INTEGER_FIELDS:
+            values.append(1)
+        else:
+            values.append(f"value-{field_name}")
+
+    return tuple(values)
 
 
 def test_end_to_end_pipeline() -> None:
@@ -134,6 +162,12 @@ def test_end_to_end_pipeline() -> None:
                 0,
             ),
             (
+                "batch_synced_at_window_violation_count",
+                "error",
+                "passed",
+                0,
+            ),
+            (
                 "source_freshness_lag_minutes",
                 "warning",
                 "failed",
@@ -188,3 +222,94 @@ def test_end_to_end_pipeline() -> None:
         destination_connection.commit()
         destination_connection.close()
         source_connection.close()
+
+
+def test_window_violation_fails_batch_without_raw_or_watermark() -> None:
+    postgres_config = postgres_connection_kwargs()
+    assert postgres_config["dbname"] == TEST_DATABASE
+
+    batch_id = uuid4()
+    source_connection = MagicMock()
+    source_connection.execute.return_value.fetchall.return_value = [
+        build_source_row("2026-09-23T09:49:59.9999999")
+    ]
+    destination_connection = psycopg.connect(**postgres_config)
+    window = ExtractionWindow(
+        start_synced_at=datetime(
+            2026, 9, 23, 9, 50, tzinfo=timezone.utc
+        ),
+        end_synced_at=datetime(
+            2026, 9, 23, 10, 0, tzinfo=timezone.utc
+        ),
+    )
+
+    try:
+        with pytest.raises(QualityGateError, match="outside"):
+            ingest_extraction_window(
+                source_connection=source_connection,
+                destination_connection=destination_connection,
+                source_name="integration.window-violation",
+                window=window,
+                batch_id=batch_id,
+            )
+
+        run = destination_connection.execute(
+            """
+            SELECT status, committed_watermark
+            FROM monitoring.pipeline_runs
+            WHERE batch_id = %s
+            """,
+            (batch_id,),
+        ).fetchone()
+        raw_count = destination_connection.execute(
+            """
+            SELECT count(*)
+            FROM raw.shopee_observations
+            WHERE batch_id = %s
+            """,
+            (batch_id,),
+        ).fetchone()[0]
+        staging_count = destination_connection.execute(
+            """
+            SELECT count(*)
+            FROM staging.shopee_records
+            WHERE first_seen_batch_id = %s
+               OR last_seen_batch_id = %s
+            """,
+            (batch_id, batch_id),
+        ).fetchone()[0]
+        quality_result = destination_connection.execute(
+            """
+            SELECT status, affected_row_count
+            FROM monitoring.quality_test_results
+            WHERE batch_id = %s
+              AND rule_code = %s
+            """,
+            (
+                batch_id,
+                "batch_synced_at_window_violation_count",
+            ),
+        ).fetchone()
+
+        assert run == ("failed", None)
+        assert raw_count == 0
+        assert staging_count == 0
+        assert quality_result == ("failed", 1)
+    finally:
+        destination_connection.rollback()
+        destination_connection.execute(
+            """
+            DELETE FROM monitoring.quality_test_results
+            WHERE batch_id = %s
+            """,
+            (batch_id,),
+        )
+        destination_connection.execute(
+            """
+            DELETE FROM monitoring.pipeline_runs
+            WHERE batch_id = %s
+            """,
+            (batch_id,),
+        )
+        destination_connection.commit()
+        destination_connection.close()

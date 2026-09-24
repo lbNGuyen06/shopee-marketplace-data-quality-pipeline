@@ -13,6 +13,7 @@ from shopee_quality.hashing import (
 )
 from shopee_quality.incremental import ExtractionWindow
 from shopee_quality.pipeline import (
+    QualityGateError,
     ingest_extraction_window,
     parse_source_synced_at,
 )
@@ -127,6 +128,53 @@ def test_ingest_extraction_window_rolls_back_before_marking_failed() -> None:
     ]
     assert complete_calls == []
     assert len(failed_calls) == 1
+
+
+def test_window_quality_gate_rolls_back_and_persists_failure() -> None:
+    clock.call_count = 0
+    source_connection, destination_connection = build_connections(
+        [build_source_row()]
+    )
+
+    def execute(sql, parameters=None):
+        result = MagicMock()
+        result.rowcount = 1
+        if "count(*) - count(DISTINCT source_row_hash)" in sql:
+            result.fetchone.return_value = (0,)
+        elif "observation.synced_at <" in sql:
+            result.fetchone.return_value = (1,)
+        return result
+
+    destination_connection.execute.side_effect = execute
+
+    with pytest.raises(QualityGateError, match="outside"):
+        ingest_extraction_window(
+            source_connection=source_connection,
+            destination_connection=destination_connection,
+            source_name="xomdb.shopee_orders",
+            window=WINDOW,
+            batch_id=BATCH_ID,
+            clock=clock,
+        )
+
+    destination_connection.rollback.assert_called_once_with()
+    assert destination_connection.commit.call_count == 2
+    quality_calls = [
+        call
+        for call in destination_connection.execute.call_args_list
+        if "INSERT INTO monitoring.quality_test_results" in call.args[0]
+        and call.args[1][1]
+        == "batch_synced_at_window_violation_count"
+    ]
+    assert len(quality_calls) == 2
+    assert quality_calls[-1].args[1][3] == "failed"
+
+    complete_calls = [
+        call
+        for call in destination_connection.execute.call_args_list
+        if "status = 'succeeded'" in call.args[0]
+    ]
+    assert complete_calls == []
 
 
 def test_parse_source_synced_at_assumes_source_is_utc() -> None:

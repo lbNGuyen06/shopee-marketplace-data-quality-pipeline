@@ -17,8 +17,10 @@ from shopee_quality.ingestion import (
 )
 from shopee_quality.quality import (
     count_batch_exact_duplicates,
+    count_batch_synced_at_window_violations,
     evaluate_batch_exact_duplicates,
     evaluate_batch_reconciliation,
+    evaluate_batch_synced_at_window_violations,
     evaluate_source_freshness,
     record_quality_test_result,
 )
@@ -31,6 +33,10 @@ class BatchResult:
     extracted_count: int
     loaded_count: int
     committed_watermark: datetime
+
+
+class QualityGateError(RuntimeError):
+    pass
 
 
 def utc_now() -> datetime:
@@ -80,6 +86,7 @@ def ingest_extraction_window(
         extraction_end_synced_at=window.end_synced_at,
     )
     destination_connection.commit()
+    failed_quality_result = None
 
     try:
         query, parameters = build_source_query(window)
@@ -134,6 +141,27 @@ def ingest_extraction_window(
             batch_id=resolved_batch_id,
             **freshness_result,
         )
+        window_violation_count = (
+            count_batch_synced_at_window_violations(
+                connection=destination_connection,
+                batch_id=resolved_batch_id,
+            )
+        )
+        window_quality_result = (
+            evaluate_batch_synced_at_window_violations(
+                window_violation_count
+            )
+        )
+        record_quality_test_result(
+            connection=destination_connection,
+            batch_id=resolved_batch_id,
+            **window_quality_result,
+        )
+        if window_quality_result["status"] == "failed":
+            failed_quality_result = window_quality_result
+            raise QualityGateError(
+                "Raw records fall outside the extraction window"
+            )
 
         extracted_count = len(source_rows)
         quality_result = evaluate_batch_reconciliation(
@@ -169,6 +197,12 @@ def ingest_extraction_window(
                 f"{type(exc).__name__}: {exc}"
             )[:2000],
         )
+        if failed_quality_result is not None:
+            record_quality_test_result(
+                connection=destination_connection,
+                batch_id=resolved_batch_id,
+                **failed_quality_result,
+            )
         destination_connection.commit()
         raise
 
