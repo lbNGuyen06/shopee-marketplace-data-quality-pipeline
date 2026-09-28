@@ -38,6 +38,26 @@ WHERE observation.batch_id = %s
   )
 """
 
+MASKED_PKID_COLLISION_COUNT_SQL = """
+WITH touched_pkids AS (
+    SELECT DISTINCT standardized_record ->> 'pkId' AS pkid
+    FROM staging.shopee_records
+    WHERE last_seen_batch_id = %s
+),
+collisions AS (
+    SELECT record.standardized_record ->> 'pkId' AS pkid
+    FROM staging.shopee_records AS record
+    JOIN touched_pkids
+      ON touched_pkids.pkid =
+         record.standardized_record ->> 'pkId'
+    WHERE touched_pkids.pkid IS NOT NULL
+    GROUP BY record.standardized_record ->> 'pkId'
+    HAVING count(DISTINCT record.source_row_hash) > 1
+)
+SELECT count(*)
+FROM collisions
+"""
+
 VALID_SEVERITIES = frozenset(
     {"info", "warning", "error"}
 )
@@ -271,5 +291,39 @@ def evaluate_batch_synced_at_window_violations(
                 "overlap_start_synced_at <= synced_at "
                 "<= extraction_end_synced_at"
             ),
+        },
+    }
+
+
+def count_masked_pkid_collisions(connection, batch_id: UUID) -> int:
+    row = connection.execute(
+        MASKED_PKID_COLLISION_COUNT_SQL,
+        (batch_id,),
+    ).fetchone()
+    return row[0]
+
+
+def evaluate_masked_pkid_collisions(collision_count: int) -> dict:
+    if (
+        isinstance(collision_count, bool)
+        or not isinstance(collision_count, int)
+        or collision_count < 0
+    ):
+        raise ValueError(
+            "collision_count must be a nonnegative integer"
+        )
+
+    return {
+        "rule_code": "masked_pkid_collision_count",
+        "severity": "warning",
+        "status": "passed" if collision_count == 0 else "failed",
+        "observed_value": Decimal(collision_count),
+        "threshold_value": Decimal(0),
+        "affected_row_count": collision_count,
+        "details": {
+            "collision_definition": (
+                "pkId associated with multiple source row hashes"
+            ),
+            "identifiers_included": False,
         },
     }

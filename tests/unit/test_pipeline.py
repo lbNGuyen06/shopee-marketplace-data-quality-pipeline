@@ -141,6 +141,8 @@ def test_window_quality_gate_rolls_back_and_persists_failure() -> None:
         result.rowcount = 1
         if "count(*) - count(DISTINCT source_row_hash)" in sql:
             result.fetchone.return_value = (0,)
+        elif "WITH touched_pkids" in sql:
+            result.fetchone.return_value = (0,)
         elif "observation.synced_at <" in sql:
             result.fetchone.return_value = (1,)
         return result

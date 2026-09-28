@@ -369,3 +369,49 @@ def test_evaluate_window_violations_rejects_invalid_count(
         quality.evaluate_batch_synced_at_window_violations(
             violation_count
         )
+
+
+def test_count_masked_pkid_collisions_scopes_to_touched_ids() -> None:
+    connection = Mock()
+    connection.execute.return_value.fetchone.return_value = (3,)
+    batch_id = UUID("11111111-1111-1111-1111-111111111111")
+
+    actual = quality.count_masked_pkid_collisions(
+        connection=connection,
+        batch_id=batch_id,
+    )
+
+    assert actual == 3
+    sql, parameters = connection.execute.call_args.args
+    assert "last_seen_batch_id = %s" in sql
+    assert "standardized_record ->> 'pkId'" in sql
+    assert "count(DISTINCT record.source_row_hash) > 1" in sql
+    assert parameters == (batch_id,)
+
+
+@pytest.mark.parametrize(
+    ("collision_count", "expected_status"),
+    [(0, "passed"), (3, "failed")],
+)
+def test_evaluate_masked_pkid_collisions(
+    collision_count: int,
+    expected_status: str,
+) -> None:
+    result = quality.evaluate_masked_pkid_collisions(collision_count)
+
+    assert result["rule_code"] == "masked_pkid_collision_count"
+    assert result["severity"] == "warning"
+    assert result["status"] == expected_status
+    assert result["observed_value"] == Decimal(collision_count)
+    assert result["threshold_value"] == Decimal(0)
+    assert result["affected_row_count"] == collision_count
+    assert result["details"]["identifiers_included"] is False
+    assert "pkId" not in result["details"].values()
+
+
+@pytest.mark.parametrize("collision_count", [-1, True, 1.5])
+def test_evaluate_masked_pkid_collisions_rejects_invalid_count(
+    collision_count,
+) -> None:
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        quality.evaluate_masked_pkid_collisions(collision_count)

@@ -18,9 +18,11 @@ from shopee_quality.ingestion import (
 from shopee_quality.quality import (
     count_batch_exact_duplicates,
     count_batch_synced_at_window_violations,
+    count_masked_pkid_collisions,
     evaluate_batch_exact_duplicates,
     evaluate_batch_reconciliation,
     evaluate_batch_synced_at_window_violations,
+    evaluate_masked_pkid_collisions,
     evaluate_source_freshness,
     record_quality_test_result,
 )
@@ -130,6 +132,18 @@ def ingest_extraction_window(
             connection=destination_connection,
             batch_id=resolved_batch_id,
             **duplicate_quality_result,
+        )
+        masked_pkid_collision_count = count_masked_pkid_collisions(
+            connection=destination_connection,
+            batch_id=resolved_batch_id,
+        )
+        masked_pkid_result = evaluate_masked_pkid_collisions(
+            masked_pkid_collision_count
+        )
+        record_quality_test_result(
+            connection=destination_connection,
+            batch_id=resolved_batch_id,
+            **masked_pkid_result,
         )
         freshness_result = evaluate_source_freshness(
             extraction_started_at=extraction_started_at,

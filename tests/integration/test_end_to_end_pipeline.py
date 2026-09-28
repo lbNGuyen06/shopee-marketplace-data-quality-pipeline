@@ -148,32 +148,37 @@ def test_end_to_end_pipeline() -> None:
         )
         assert raw_count == result.loaded_count
         assert raw_contract == (64, 84)
-        assert quality_results == [
-            (
-                "batch_exact_duplicate_count",
-                "warning",
-                "passed",
-                0,
-            ),
-            (
-                "batch_row_count_reconciliation",
-                "error",
-                "passed",
-                0,
-            ),
-            (
-                "batch_synced_at_window_violation_count",
-                "error",
-                "passed",
-                0,
-            ),
-            (
-                "source_freshness_lag_minutes",
-                "warning",
-                "failed",
-                1,
-            ),
+        quality_by_rule = {
+            rule_code: (severity, status, affected_row_count)
+            for (
+                rule_code,
+                severity,
+                status,
+                affected_row_count,
+            ) in quality_results
+        }
+        assert quality_by_rule[
+            "batch_exact_duplicate_count"
+        ] == ("warning", "passed", 0)
+        assert quality_by_rule[
+            "batch_row_count_reconciliation"
+        ] == ("error", "passed", 0)
+        assert quality_by_rule[
+            "batch_synced_at_window_violation_count"
+        ] == ("error", "passed", 0)
+        assert quality_by_rule[
+            "source_freshness_lag_minutes"
+        ] == ("warning", "failed", 1)
+
+        masked_collision = quality_by_rule[
+            "masked_pkid_collision_count"
         ]
+        assert masked_collision[0] == "warning"
+        assert masked_collision[1] in {"passed", "failed"}
+        assert masked_collision[2] >= 0
+        assert masked_collision[1] == (
+            "passed" if masked_collision[2] == 0 else "failed"
+        )
     finally:
         destination_connection.rollback()
         destination_connection.execute(
