@@ -84,6 +84,7 @@ def test_ingest_extraction_window_commits_raw_and_watermark() -> None:
     assert result.batch_id == BATCH_ID
     assert result.extracted_count == 2
     assert result.loaded_count == 2
+    assert result.rejected_count == 0
     assert result.committed_watermark == WINDOW.end_synced_at
     assert destination_connection.commit.call_count == 2
     destination_connection.rollback.assert_not_called()
@@ -95,6 +96,59 @@ def test_ingest_extraction_window_commits_raw_and_watermark() -> None:
     ]
     assert [call.args[1][1] for call in raw_calls] == [1, 2]
     assert all(len(call.args[1][2]) == 64 for call in raw_calls)
+
+
+def test_ingest_extraction_window_isolates_invalid_source_record() -> None:
+    clock.call_count = 0
+    invalid_row = list(build_source_row("invalid-source"))
+    invalid_value = "private-invalid-synced-at"
+    invalid_row[CANONICAL_FIELDS.index("synced_at")] = invalid_value
+    source_connection, destination_connection = build_connections(
+        [build_source_row(), tuple(invalid_row)]
+    )
+
+    result = ingest_extraction_window(
+        source_connection=source_connection,
+        destination_connection=destination_connection,
+        source_name="xomdb.shopee_orders",
+        window=WINDOW,
+        source_schema_metadata=SOURCE_SCHEMA_CONTRACT,
+        batch_id=BATCH_ID,
+        clock=clock,
+    )
+
+    assert result.extracted_count == 2
+    assert result.loaded_count == 1
+    assert result.rejected_count == 1
+    destination_connection.rollback.assert_not_called()
+
+    raw_calls = [
+        call
+        for call in destination_connection.execute.call_args_list
+        if "INSERT INTO raw.shopee_observations" in call.args[0]
+    ]
+    rejected_calls = [
+        call
+        for call in destination_connection.execute.call_args_list
+        if "INSERT INTO monitoring.rejected_records" in call.args[0]
+    ]
+    complete_calls = [
+        call
+        for call in destination_connection.execute.call_args_list
+        if "status = 'succeeded'" in call.args[0]
+    ]
+
+    assert len(raw_calls) == 1
+    assert len(rejected_calls) == 1
+    rejected_parameters = rejected_calls[0].args[1]
+    assert rejected_parameters[1:5] == (
+        2,
+        None,
+        "source_record_contract_validation",
+        "Source record failed canonical validation",
+    )
+    assert invalid_value not in rejected_parameters[4]
+    assert complete_calls[0].args[1][2:6] == (2, 1, 0, 1)
 
 
 def test_ingest_extraction_window_rolls_back_before_marking_failed() -> None:

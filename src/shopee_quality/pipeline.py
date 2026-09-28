@@ -13,6 +13,7 @@ from shopee_quality.ingestion import (
     complete_pipeline_run,
     fail_pipeline_run,
     insert_raw_observation,
+    insert_rejected_record,
     start_pipeline_run,
 )
 from shopee_quality.quality import (
@@ -37,6 +38,7 @@ class BatchResult:
     extracted_count: int
     loaded_count: int
     committed_watermark: datetime
+    rejected_count: int = 0
 
 
 class QualityGateError(RuntimeError):
@@ -105,12 +107,28 @@ def ingest_extraction_window(
             parameters,
         ).fetchall()
 
+        loaded_count = 0
+        rejected_count = 0
+
         for source_row_number, row in enumerate(source_rows, start=1):
             source_record = source_row_to_record(row)
-            source_row_hash = compute_source_row_hash(source_record)
-            synced_at = parse_source_synced_at(
-                source_record["synced_at"]
-            )
+            try:
+                source_row_hash = compute_source_row_hash(source_record)
+                synced_at = parse_source_synced_at(
+                    source_record["synced_at"]
+                )
+            except (TypeError, ValueError):
+                insert_rejected_record(
+                    connection=destination_connection,
+                    batch_id=resolved_batch_id,
+                    source_row_number=source_row_number,
+                    source_record=source_record,
+                    source_row_hash=None,
+                    rule_code="source_record_contract_validation",
+                    reason="Source record failed canonical validation",
+                )
+                rejected_count += 1
+                continue
 
             insert_raw_observation(
                 connection=destination_connection,
@@ -128,6 +146,7 @@ def ingest_extraction_window(
                 synced_at=synced_at,
                 standardized_record=source_record,
             )
+            loaded_count += 1
 
         exact_duplicate_count = count_batch_exact_duplicates(
             connection=destination_connection,
@@ -188,9 +207,9 @@ def ingest_extraction_window(
         extracted_count = len(source_rows)
         quality_result = evaluate_batch_reconciliation(
             extracted_count=extracted_count,
-            loaded_count=extracted_count,
+            loaded_count=loaded_count,
             duplicate_count=0,
-            rejected_count=0,
+            rejected_count=rejected_count,
         )
         record_quality_test_result(
             connection=destination_connection,
@@ -204,9 +223,9 @@ def ingest_extraction_window(
             extraction_ended_at=extraction_ended_at,
             committed_watermark=window.end_synced_at,
             extracted_count=extracted_count,
-            loaded_count=extracted_count,
+            loaded_count=loaded_count,
             duplicate_count=0,
-            rejected_count=0,
+            rejected_count=rejected_count,
         )
         destination_connection.commit()
     except Exception as exc:
@@ -231,6 +250,7 @@ def ingest_extraction_window(
     return BatchResult(
         batch_id=resolved_batch_id,
         extracted_count=extracted_count,
-        loaded_count=extracted_count,
+        loaded_count=loaded_count,
         committed_watermark=window.end_synced_at,
+        rejected_count=rejected_count,
     )

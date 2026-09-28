@@ -101,6 +101,70 @@ def test_insert_raw_observation_inserts_json_record() -> None:
     connection.commit.assert_not_called()
 
 
+def test_insert_rejected_record_inserts_json_without_hash() -> None:
+    connection = Mock()
+    batch_id = UUID("11111111-1111-1111-1111-111111111111")
+    source_record = {
+        "pkId": "PK-TEST-001",
+        "synced_at": "invalid-datetime",
+    }
+
+    ingestion.insert_rejected_record(
+        connection=connection,
+        batch_id=batch_id,
+        source_row_number=2,
+        source_record=source_record,
+        rule_code="source_record_contract_validation",
+        reason="Source record failed canonical validation",
+    )
+
+    sql, parameters = connection.execute.call_args.args
+    assert "INSERT INTO monitoring.rejected_records" in sql
+    assert parameters[:5] == (
+        batch_id,
+        2,
+        None,
+        "source_record_contract_validation",
+        "Source record failed canonical validation",
+    )
+    assert isinstance(parameters[5], Jsonb)
+    assert parameters[5].obj == source_record
+    connection.commit.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("source_row_number", "source_row_hash", "rule_code", "reason"),
+    [
+        (0, None, "rule", "reason"),
+        (1, "invalid", "rule", "reason"),
+        (1, None, "", "reason"),
+        (1, None, "rule", ""),
+    ],
+)
+def test_insert_rejected_record_rejects_invalid_metadata(
+    source_row_number,
+    source_row_hash,
+    rule_code,
+    reason,
+) -> None:
+    connection = Mock()
+
+    with pytest.raises((TypeError, ValueError)):
+        ingestion.insert_rejected_record(
+            connection=connection,
+            batch_id=UUID(
+                "11111111-1111-1111-1111-111111111111"
+            ),
+            source_row_number=source_row_number,
+            source_record={"pkId": "PK-TEST-001"},
+            source_row_hash=source_row_hash,
+            rule_code=rule_code,
+            reason=reason,
+        )
+
+    connection.execute.assert_not_called()
+
+
 @pytest.mark.parametrize(
     ("source_row_number", "source_row_hash"),
     [

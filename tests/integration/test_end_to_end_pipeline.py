@@ -352,3 +352,143 @@ def test_window_violation_fails_batch_without_raw_or_watermark() -> None:
         )
         destination_connection.commit()
         destination_connection.close()
+
+
+def test_invalid_record_is_rejected_without_failing_batch() -> None:
+    postgres_config = postgres_connection_kwargs()
+    assert postgres_config["dbname"] == TEST_DATABASE
+
+    batch_id = uuid4()
+    valid_synced_at = "2026-09-23T09:55:00.0000000"
+    invalid_synced_at = "private-invalid-synced-at"
+    invalid_row = list(build_source_row(valid_synced_at))
+    invalid_row[CANONICAL_FIELDS.index("synced_at")] = invalid_synced_at
+    source_connection = MagicMock()
+    source_connection.execute.return_value.fetchall.return_value = [
+        build_source_row(valid_synced_at),
+        tuple(invalid_row),
+    ]
+    destination_connection = psycopg.connect(**postgres_config)
+    window = ExtractionWindow(
+        start_synced_at=datetime(
+            2026, 9, 23, 9, 50, tzinfo=timezone.utc
+        ),
+        end_synced_at=datetime(
+            2026, 9, 23, 10, 0, tzinfo=timezone.utc
+        ),
+    )
+
+    try:
+        result = ingest_extraction_window(
+            source_connection=source_connection,
+            destination_connection=destination_connection,
+            source_name="integration.rejected-record",
+            window=window,
+            source_schema_metadata=SOURCE_SCHEMA_CONTRACT,
+            batch_id=batch_id,
+        )
+
+        run = destination_connection.execute(
+            """
+            SELECT
+                status,
+                extracted_count,
+                loaded_count,
+                duplicate_count,
+                rejected_count
+            FROM monitoring.pipeline_runs
+            WHERE batch_id = %s
+            """,
+            (batch_id,),
+        ).fetchone()
+        raw_count = destination_connection.execute(
+            """
+            SELECT count(*)
+            FROM raw.shopee_observations
+            WHERE batch_id = %s
+            """,
+            (batch_id,),
+        ).fetchone()[0]
+        rejected = destination_connection.execute(
+            """
+            SELECT
+                source_row_number,
+                source_row_hash,
+                rule_code,
+                reason,
+                source_record ->> 'synced_at'
+            FROM monitoring.rejected_records
+            WHERE batch_id = %s
+            """,
+            (batch_id,),
+        ).fetchone()
+        reconciliation = destination_connection.execute(
+            """
+            SELECT status, affected_row_count
+            FROM monitoring.quality_test_results
+            WHERE batch_id = %s
+              AND rule_code = 'batch_row_count_reconciliation'
+            """,
+            (batch_id,),
+        ).fetchone()
+
+        assert result.extracted_count == 2
+        assert result.loaded_count == 1
+        assert result.rejected_count == 1
+        assert run == ("succeeded", 2, 1, 0, 1)
+        assert raw_count == 1
+        assert rejected == (
+            2,
+            None,
+            "source_record_contract_validation",
+            "Source record failed canonical validation",
+            invalid_synced_at,
+        )
+        assert reconciliation == ("passed", 0)
+    finally:
+        destination_connection.rollback()
+        destination_connection.execute(
+            """
+            DELETE FROM staging.shopee_records
+            WHERE first_seen_batch_id = %s
+               OR last_seen_batch_id = %s
+            """,
+            (batch_id, batch_id),
+        )
+        destination_connection.execute(
+            """
+            DELETE FROM monitoring.quality_test_results
+            WHERE batch_id = %s
+            """,
+            (batch_id,),
+        )
+        destination_connection.execute(
+            """
+            DELETE FROM monitoring.rejected_records
+            WHERE batch_id = %s
+            """,
+            (batch_id,),
+        )
+        destination_connection.execute(
+            """
+            DELETE FROM monitoring.schema_snapshots
+            WHERE batch_id = %s
+            """,
+            (batch_id,),
+        )
+        destination_connection.execute(
+            """
+            DELETE FROM raw.shopee_observations
+            WHERE batch_id = %s
+            """,
+            (batch_id,),
+        )
+        destination_connection.execute(
+            """
+            DELETE FROM monitoring.pipeline_runs
+            WHERE batch_id = %s
+            """,
+            (batch_id,),
+        )
+        destination_connection.commit()
+        destination_connection.close()

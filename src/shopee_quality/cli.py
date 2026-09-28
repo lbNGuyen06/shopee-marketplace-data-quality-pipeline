@@ -165,6 +165,7 @@ def run_batch(args, output=print):
         output(f"window_end={window.end_synced_at.isoformat()}")
         output(f"extracted_count={result.extracted_count}")
         output(f"loaded_count={result.loaded_count}")
+        output(f"rejected_count={result.rejected_count}")
         return result
     finally:
         if destination_connection is not None:

@@ -100,6 +100,7 @@ def test_run_batch_validates_schema_and_closes_connections(
                 extracted_count=2,
                 loaded_count=2,
                 committed_watermark=window.end_synced_at,
+                rejected_count=0,
             )
         ),
     )
@@ -122,6 +123,7 @@ def test_run_batch_validates_schema_and_closes_connections(
     messages = [call.args[0] for call in output.call_args_list]
     assert "status=succeeded" in messages
     assert "extracted_count=2" in messages
+    assert "rejected_count=0" in messages
 
 
 def test_run_batch_stops_on_schema_drift_and_closes_connections(

@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+from typing import Optional
 from uuid import UUID
 
 from psycopg.types.json import Jsonb
@@ -30,6 +31,18 @@ INSERT INTO raw.shopee_observations (
     source_record
 )
 VALUES (%s, %s, %s, %s, %s)
+"""
+
+INSERT_REJECTED_RECORD_SQL = """
+INSERT INTO monitoring.rejected_records (
+    batch_id,
+    source_row_number,
+    source_row_hash,
+    rule_code,
+    reason,
+    source_record
+)
+VALUES (%s, %s, %s, %s, %s, %s)
 """
 
 COMPLETE_PIPELINE_RUN_SQL = """
@@ -108,6 +121,51 @@ def insert_raw_observation(
             source_row_number,
             source_row_hash,
             synced_at,
+            Jsonb(source_record),
+        ),
+    )
+
+
+def insert_rejected_record(
+    connection,
+    batch_id: UUID,
+    source_row_number: int,
+    source_record: dict,
+    rule_code: str,
+    reason: str,
+    source_row_hash: Optional[str] = None,
+) -> None:
+    if (
+        isinstance(source_row_number, bool)
+        or not isinstance(source_row_number, int)
+        or source_row_number <= 0
+    ):
+        raise ValueError(
+            "source_row_number must be a positive integer"
+        )
+    if source_row_hash is not None and (
+        not isinstance(source_row_hash, str)
+        or not SOURCE_ROW_HASH_PATTERN.fullmatch(source_row_hash)
+    ):
+        raise ValueError(
+            "source_row_hash must be null or contain 64 lowercase "
+            "hexadecimal characters"
+        )
+    if not isinstance(source_record, dict):
+        raise TypeError("source_record must be a dictionary")
+    if not isinstance(rule_code, str) or not rule_code.strip():
+        raise ValueError("rule_code must be a non-empty string")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("reason must be a non-empty string")
+
+    connection.execute(
+        INSERT_REJECTED_RECORD_SQL,
+        (
+            batch_id,
+            source_row_number,
+            source_row_hash,
+            rule_code,
+            reason,
             Jsonb(source_record),
         ),
     )
