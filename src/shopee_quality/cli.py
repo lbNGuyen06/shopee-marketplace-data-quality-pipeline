@@ -17,6 +17,7 @@ from shopee_quality.pipeline import (
     ingest_extraction_window,
     parse_source_synced_at,
 )
+from shopee_quality.reporting import fetch_daily_source_health
 from shopee_quality.schema_contract import (
     build_source_schema_query,
     validate_source_schema,
@@ -54,6 +55,21 @@ def timezone_aware_datetime(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def positive_integer(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "must be a positive integer"
+        ) from exc
+
+    if parsed < 1:
+        raise argparse.ArgumentTypeError(
+            "must be a positive integer"
+        )
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="shopee-quality",
@@ -84,6 +100,21 @@ def build_parser() -> argparse.ArgumentParser:
                 "1440",
             )
         ),
+    )
+    health_parser = subparsers.add_parser(
+        "show-health",
+        help="show recent daily source-health metrics",
+    )
+    health_parser.add_argument(
+        "--days",
+        type=positive_integer,
+        default=7,
+        help="number of calendar days to include (default: 7)",
+    )
+    health_parser.add_argument(
+        "--source-name",
+        default=SOURCE_NAME,
+        help="source name stored in monitoring.pipeline_runs",
     )
     return parser
 
@@ -141,6 +172,45 @@ def run_batch(args, output=print):
         source_connection.close()
 
 
+def show_health(args, output=print):
+    connection = psycopg.connect(**postgres_connection_kwargs())
+    try:
+        rows = fetch_daily_source_health(
+            connection=connection,
+            days=args.days,
+            source_name=args.source_name,
+        )
+        if not rows:
+            output("No source-health records found.")
+            return []
+
+        output(
+            "metric_date\truns\tsucceeded\tfailed\textracted\tloaded\t"
+            "rejected\tquality_failures\twarnings\terrors\twatermark\t"
+            "schema_hash"
+        )
+        for row in rows:
+            watermark = (
+                row.latest_committed_watermark.isoformat()
+                if row.latest_committed_watermark is not None
+                else "-"
+            )
+            output(
+                f"{row.metric_date.isoformat()}\t{row.run_count}\t"
+                f"{row.succeeded_run_count}\t{row.failed_run_count}\t"
+                f"{row.extracted_record_count}\t"
+                f"{row.loaded_record_count}\t"
+                f"{row.rejected_record_count}\t"
+                f"{row.failed_quality_rule_count}\t"
+                f"{row.warning_quality_failure_count}\t"
+                f"{row.error_quality_failure_count}\t{watermark}\t"
+                f"{row.latest_schema_hash or '-'}"
+            )
+        return rows
+    finally:
+        connection.close()
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     load_dotenv(override=False)
     parser = build_parser()
@@ -149,6 +219,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         if args.command == "run-batch":
             run_batch(args)
+            return 0
+        if args.command == "show-health":
+            show_health(args)
             return 0
     except Exception as exc:
         print(

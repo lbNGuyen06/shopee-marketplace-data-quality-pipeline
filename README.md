@@ -99,6 +99,16 @@ The SQL files in `sql/ddl` run automatically only when the PostgreSQL data
 volume is first initialized. Apply later schema changes through explicit,
 versioned migrations rather than recreating a populated volume.
 
+After applying all migrations, display the last seven days of aggregate
+pipeline-health metrics without reconnecting to the source database:
+
+```shell
+shopee-quality show-health --days 7
+```
+
+Use `--source-name` only when querying a source name other than
+`xomdb.vietnam_ecommerce.shopee_orders`.
+
 ## Challenges and Solutions
 
 This section will document real technical problems discovered during

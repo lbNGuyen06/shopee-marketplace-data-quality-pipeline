@@ -8,6 +8,7 @@ import pytest
 
 from shopee_quality import cli
 from shopee_quality.pipeline import BatchResult
+from shopee_quality.reporting import DailySourceHealth
 from shopee_quality.schema_contract import SOURCE_SCHEMA_CONTRACT
 
 
@@ -36,6 +37,12 @@ def test_timezone_aware_datetime_normalizes_to_utc() -> None:
 def test_timezone_aware_datetime_rejects_naive_value() -> None:
     with pytest.raises(argparse.ArgumentTypeError, match="timezone"):
         cli.timezone_aware_datetime("2026-09-23T10:00:00")
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "not-a-number"])
+def test_positive_integer_rejects_invalid_value(value) -> None:
+    with pytest.raises(argparse.ArgumentTypeError, match="positive"):
+        cli.positive_integer(value)
 
 
 def test_run_batch_validates_schema_and_closes_connections(
@@ -184,3 +191,98 @@ def test_main_returns_nonzero_without_exposing_environment(
     assert exit_code == 1
     assert "connection unavailable" in captured.err
     assert "SOURCE_DB_PASSWORD" not in captured.err
+
+
+def test_show_health_outputs_rows_and_closes_connection(
+    monkeypatch,
+) -> None:
+    connection = MagicMock()
+    watermark = datetime(2026, 9, 28, 9, 0, tzinfo=timezone.utc)
+    row = DailySourceHealth(
+        metric_date=datetime(2026, 9, 28).date(),
+        source_name=cli.SOURCE_NAME,
+        run_count=3,
+        succeeded_run_count=2,
+        failed_run_count=1,
+        extracted_record_count=100,
+        loaded_record_count=98,
+        rejected_record_count=2,
+        failed_quality_rule_count=4,
+        warning_quality_failure_count=3,
+        error_quality_failure_count=1,
+        latest_committed_watermark=watermark,
+        latest_schema_hash="a" * 64,
+    )
+    monkeypatch.setattr(
+        cli,
+        "postgres_connection_kwargs",
+        MagicMock(return_value={"dbname": "test-database"}),
+    )
+    monkeypatch.setattr(
+        cli.psycopg,
+        "connect",
+        MagicMock(return_value=connection),
+    )
+    monkeypatch.setattr(
+        cli,
+        "fetch_daily_source_health",
+        MagicMock(return_value=[row]),
+    )
+    output = MagicMock()
+
+    actual = cli.show_health(
+        SimpleNamespace(days=7, source_name=cli.SOURCE_NAME),
+        output=output,
+    )
+
+    assert actual == [row]
+    cli.fetch_daily_source_health.assert_called_once_with(
+        connection=connection,
+        days=7,
+        source_name=cli.SOURCE_NAME,
+    )
+    connection.close.assert_called_once_with()
+    messages = [call.args[0] for call in output.call_args_list]
+    assert messages[0].startswith("metric_date\truns")
+    assert "2026-09-28\t3\t2\t1\t100\t98" in messages[1]
+
+
+def test_show_health_handles_empty_result_and_closes_connection(
+    monkeypatch,
+) -> None:
+    connection = MagicMock()
+    monkeypatch.setattr(
+        cli,
+        "postgres_connection_kwargs",
+        MagicMock(return_value={"dbname": "test-database"}),
+    )
+    monkeypatch.setattr(
+        cli.psycopg,
+        "connect",
+        MagicMock(return_value=connection),
+    )
+    monkeypatch.setattr(
+        cli,
+        "fetch_daily_source_health",
+        MagicMock(return_value=[]),
+    )
+    output = MagicMock()
+
+    actual = cli.show_health(
+        SimpleNamespace(days=7, source_name=cli.SOURCE_NAME),
+        output=output,
+    )
+
+    assert actual == []
+    output.assert_called_once_with("No source-health records found.")
+    connection.close.assert_called_once_with()
+
+
+def test_main_dispatches_show_health(monkeypatch) -> None:
+    show_health = MagicMock(return_value=[])
+    monkeypatch.setattr(cli, "show_health", show_health)
+
+    exit_code = cli.main(["show-health", "--days", "3"])
+
+    assert exit_code == 0
+    assert show_health.call_args.args[0].days == 3
