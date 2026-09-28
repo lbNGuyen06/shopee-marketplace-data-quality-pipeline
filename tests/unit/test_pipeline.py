@@ -17,6 +17,7 @@ from shopee_quality.pipeline import (
     ingest_extraction_window,
     parse_source_synced_at,
 )
+from shopee_quality.schema_contract import SOURCE_SCHEMA_CONTRACT
 
 
 BATCH_ID = UUID("11111111-1111-1111-1111-111111111111")
@@ -75,6 +76,7 @@ def test_ingest_extraction_window_commits_raw_and_watermark() -> None:
         destination_connection=destination_connection,
         source_name="xomdb.shopee_orders",
         window=WINDOW,
+        source_schema_metadata=SOURCE_SCHEMA_CONTRACT,
         batch_id=BATCH_ID,
         clock=clock,
     )
@@ -109,6 +111,7 @@ def test_ingest_extraction_window_rolls_back_before_marking_failed() -> None:
             destination_connection=destination_connection,
             source_name="xomdb.shopee_orders",
             window=WINDOW,
+            source_schema_metadata=SOURCE_SCHEMA_CONTRACT,
             batch_id=BATCH_ID,
             clock=clock,
         )
@@ -155,6 +158,7 @@ def test_window_quality_gate_rolls_back_and_persists_failure() -> None:
             destination_connection=destination_connection,
             source_name="xomdb.shopee_orders",
             window=WINDOW,
+            source_schema_metadata=SOURCE_SCHEMA_CONTRACT,
             batch_id=BATCH_ID,
             clock=clock,
         )

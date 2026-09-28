@@ -23,6 +23,11 @@ from shopee_quality.pipeline import (
     ingest_extraction_window,
     parse_source_synced_at,
 )
+from shopee_quality.schema_contract import (
+    SOURCE_SCHEMA_CONTRACT,
+    build_source_schema_query,
+    validate_source_schema,
+)
 
 
 TEST_DATABASE = "shopee_quality_e2e_test"
@@ -67,6 +72,13 @@ def test_end_to_end_pipeline() -> None:
         )
         destination_connection.rollback()
 
+        schema_query, schema_parameters = build_source_schema_query()
+        schema_rows = source_connection.execute(
+            schema_query,
+            schema_parameters,
+        ).fetchall()
+        validated_schema = validate_source_schema(schema_rows)
+
         maximum_synced_at = source_connection.execute(
             """
             SELECT CONVERT(varchar(27), MAX([synced_at]), 126)
@@ -86,6 +98,7 @@ def test_end_to_end_pipeline() -> None:
             destination_connection=destination_connection,
             source_name="xomdb.vietnam_ecommerce.shopee_orders",
             window=window,
+            source_schema_metadata=validated_schema,
             batch_id=batch_id,
         )
 
@@ -135,6 +148,19 @@ def test_end_to_end_pipeline() -> None:
             """,
             (batch_id,),
         ).fetchall()
+        schema_snapshot = destination_connection.execute(
+            """
+            SELECT
+                source_schema,
+                source_table,
+                length(schema_hash),
+                column_count,
+                jsonb_array_length(schema_definition)
+            FROM monitoring.schema_snapshots
+            WHERE batch_id = %s
+            """,
+            (batch_id,),
+        ).fetchone()
 
         assert result.batch_id == batch_id
         assert result.extracted_count > 0
@@ -148,6 +174,13 @@ def test_end_to_end_pipeline() -> None:
         )
         assert raw_count == result.loaded_count
         assert raw_contract == (64, 84)
+        assert schema_snapshot == (
+            "vietnam_ecommerce",
+            "shopee_orders",
+            64,
+            84,
+            84,
+        )
         quality_by_rule = {
             rule_code: (severity, status, affected_row_count)
             for (
@@ -255,6 +288,7 @@ def test_window_violation_fails_batch_without_raw_or_watermark() -> None:
                 destination_connection=destination_connection,
                 source_name="integration.window-violation",
                 window=window,
+                source_schema_metadata=SOURCE_SCHEMA_CONTRACT,
                 batch_id=batch_id,
             )
 

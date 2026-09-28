@@ -27,6 +27,8 @@ from shopee_quality.quality import (
     record_quality_test_result,
 )
 from shopee_quality.staging import upsert_staging_record
+from shopee_quality.schema_contract import SourceColumnMetadata
+from shopee_quality.schema_snapshot import record_schema_snapshot
 
 
 @dataclass(frozen=True)
@@ -67,6 +69,7 @@ def ingest_extraction_window(
     destination_connection,
     source_name: str,
     window: ExtractionWindow,
+    source_schema_metadata: tuple[SourceColumnMetadata, ...],
     batch_id: Optional[UUID] = None,
     clock: Callable[[], datetime] = utc_now,
     freshness_threshold_minutes: int = 1440,
@@ -91,6 +94,11 @@ def ingest_extraction_window(
     failed_quality_result = None
 
     try:
+        record_schema_snapshot(
+            connection=destination_connection,
+            batch_id=resolved_batch_id,
+            columns=source_schema_metadata,
+        )
         query, parameters = build_source_query(window)
         source_rows = source_connection.execute(
             query,

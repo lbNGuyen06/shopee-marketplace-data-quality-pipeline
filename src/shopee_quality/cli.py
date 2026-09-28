@@ -101,7 +101,7 @@ def run_batch(args, output=print):
             schema_query,
             schema_parameters,
         ).fetchall()
-        validate_source_schema(schema_rows)
+        validated_schema = validate_source_schema(schema_rows)
 
         maximum_synced_at = source_connection.execute(
             SOURCE_MAX_SYNCED_AT_QUERY
@@ -122,6 +122,7 @@ def run_batch(args, output=print):
             destination_connection=destination_connection,
             source_name=SOURCE_NAME,
             window=window,
+            source_schema_metadata=validated_schema,
             freshness_threshold_minutes=(
                 args.freshness_threshold_minutes
             ),
