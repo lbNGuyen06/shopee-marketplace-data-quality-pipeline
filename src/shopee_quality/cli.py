@@ -1,8 +1,10 @@
 import argparse
+import logging
 import os
 import sys
 from datetime import datetime, timezone
 from typing import Optional, Sequence
+from uuid import uuid4
 
 import psycopg
 import pyodbc
@@ -13,6 +15,7 @@ from shopee_quality.database import (
     sqlserver_connection_string,
 )
 from shopee_quality.incremental import resolve_extraction_window
+from shopee_quality.observability import configure_logging, log_event
 from shopee_quality.pipeline import (
     ingest_extraction_window,
     parse_source_synced_at,
@@ -120,6 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run_batch(args, output=print):
+    batch_id = uuid4()
     source_connection = pyodbc.connect(sqlserver_connection_string())
     destination_connection = None
 
@@ -133,6 +137,12 @@ def run_batch(args, output=print):
             schema_parameters,
         ).fetchall()
         validated_schema = validate_source_schema(schema_rows)
+        log_event(
+            "schema_validated",
+            batch_id=batch_id,
+            source_name=SOURCE_NAME,
+            schema_column_count=len(validated_schema),
+        )
 
         maximum_synced_at = source_connection.execute(
             SOURCE_MAX_SYNCED_AT_QUERY
@@ -154,6 +164,7 @@ def run_batch(args, output=print):
             source_name=SOURCE_NAME,
             window=window,
             source_schema_metadata=validated_schema,
+            batch_id=batch_id,
             freshness_threshold_minutes=(
                 args.freshness_threshold_minutes
             ),
@@ -214,6 +225,7 @@ def show_health(args, output=print):
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     load_dotenv(override=False)
+    configure_logging()
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -225,6 +237,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             show_health(args)
             return 0
     except Exception as exc:
+        log_event(
+            "cli_command_failed",
+            level=logging.ERROR,
+            error_type=type(exc).__name__,
+        )
         print(
             f"error={type(exc).__name__}: {exc}",
             file=sys.stderr,

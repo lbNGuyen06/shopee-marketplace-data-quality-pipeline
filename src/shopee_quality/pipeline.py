@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Optional
@@ -27,6 +28,7 @@ from shopee_quality.quality import (
     evaluate_source_freshness,
     record_quality_test_result,
 )
+from shopee_quality.observability import log_event
 from shopee_quality.staging import upsert_staging_record
 from shopee_quality.schema_contract import SourceColumnMetadata
 from shopee_quality.schema_snapshot import record_schema_snapshot
@@ -93,6 +95,13 @@ def ingest_extraction_window(
         extraction_end_synced_at=window.end_synced_at,
     )
     destination_connection.commit()
+    log_event(
+        "pipeline_started",
+        batch_id=resolved_batch_id,
+        source_name=source_name,
+        window_start=window.start_synced_at,
+        window_end=window.end_synced_at,
+    )
     failed_quality_result = None
 
     try:
@@ -106,6 +115,12 @@ def ingest_extraction_window(
             query,
             parameters,
         ).fetchall()
+        log_event(
+            "extraction_completed",
+            batch_id=resolved_batch_id,
+            source_name=source_name,
+            extracted_count=len(source_rows),
+        )
 
         loaded_count = 0
         rejected_count = 0
@@ -147,6 +162,15 @@ def ingest_extraction_window(
                 standardized_record=source_record,
             )
             loaded_count += 1
+
+        log_event(
+            "records_processed",
+            batch_id=resolved_batch_id,
+            source_name=source_name,
+            extracted_count=len(source_rows),
+            loaded_count=loaded_count,
+            rejected_count=rejected_count,
+        )
 
         exact_duplicate_count = count_batch_exact_duplicates(
             connection=destination_connection,
@@ -216,6 +240,24 @@ def ingest_extraction_window(
             batch_id=resolved_batch_id,
             **quality_result,
         )
+        quality_results = (
+            duplicate_quality_result,
+            masked_pkid_result,
+            freshness_result,
+            window_quality_result,
+            quality_result,
+        )
+        quality_warning_count = sum(
+            result["status"] == "failed"
+            and result["severity"] == "warning"
+            for result in quality_results
+        )
+        log_event(
+            "quality_checks_completed",
+            batch_id=resolved_batch_id,
+            source_name=source_name,
+            quality_warning_count=quality_warning_count,
+        )
         extraction_ended_at = clock()
         complete_pipeline_run(
             connection=destination_connection,
@@ -228,12 +270,25 @@ def ingest_extraction_window(
             rejected_count=rejected_count,
         )
         destination_connection.commit()
+        log_event(
+            "pipeline_succeeded",
+            batch_id=resolved_batch_id,
+            source_name=source_name,
+            extracted_count=extracted_count,
+            loaded_count=loaded_count,
+            duplicate_count=0,
+            rejected_count=rejected_count,
+            duration_seconds=(
+                extraction_ended_at - extraction_started_at
+            ).total_seconds(),
+        )
     except Exception as exc:
         destination_connection.rollback()
+        extraction_failed_at = clock()
         fail_pipeline_run(
             connection=destination_connection,
             batch_id=resolved_batch_id,
-            extraction_ended_at=clock(),
+            extraction_ended_at=extraction_failed_at,
             error_summary=(
                 f"{type(exc).__name__}: {exc}"
             )[:2000],
@@ -245,6 +300,16 @@ def ingest_extraction_window(
                 **failed_quality_result,
             )
         destination_connection.commit()
+        log_event(
+            "pipeline_failed",
+            level=logging.ERROR,
+            batch_id=resolved_batch_id,
+            source_name=source_name,
+            duration_seconds=(
+                extraction_failed_at - extraction_started_at
+            ).total_seconds(),
+            error_type=type(exc).__name__,
+        )
         raise
 
     return BatchResult(

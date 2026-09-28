@@ -65,8 +65,15 @@ def clock():
     return STARTED_AT if clock.call_count == 1 else ENDED_AT
 
 
-def test_ingest_extraction_window_commits_raw_and_watermark() -> None:
+def test_ingest_extraction_window_commits_raw_and_watermark(
+    monkeypatch,
+) -> None:
     clock.call_count = 0
+    event_logger = MagicMock()
+    monkeypatch.setattr(
+        "shopee_quality.pipeline.log_event",
+        event_logger,
+    )
     source_connection, destination_connection = build_connections(
         [build_source_row(), build_source_row("source-2")]
     )
@@ -96,6 +103,17 @@ def test_ingest_extraction_window_commits_raw_and_watermark() -> None:
     ]
     assert [call.args[1][1] for call in raw_calls] == [1, 2]
     assert all(len(call.args[1][2]) == 64 for call in raw_calls)
+    assert [call.args[0] for call in event_logger.call_args_list] == [
+        "pipeline_started",
+        "extraction_completed",
+        "records_processed",
+        "quality_checks_completed",
+        "pipeline_succeeded",
+    ]
+    assert all(
+        call.kwargs["batch_id"] == BATCH_ID
+        for call in event_logger.call_args_list
+    )
 
 
 def test_ingest_extraction_window_isolates_invalid_source_record() -> None:
