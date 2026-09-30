@@ -21,5 +21,41 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  airflow:
+    profiles:
+      - airflow
+    build:
+      context: .
+      dockerfile: docker/airflow/Dockerfile
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: UTC
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      PIPELINE_INITIAL_START: ${PIPELINE_INITIAL_START:-2026-01-01T00:00:00+00:00}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      SOURCE_DB_DRIVER: ODBC Driver 18 for SQL Server
+    command: standalone
+    ports:
+      - "${AIRFLOW_PORT:-8080}:8080"
+    volumes:
+      - airflow_data:/opt/airflow
+      - ./dags:/opt/airflow/dags:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl --fail --silent http://localhost:8080/api/v2/monitor/health
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  airflow_data:

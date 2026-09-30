@@ -109,6 +109,31 @@ shopee-quality show-health --days 7
 Use `--source-name` only when querying a source name other than
 `xomdb.vietnam_ecommerce.shopee_orders`.
 
+### Local Airflow orchestration
+
+The optional Airflow profile uses a custom Linux image with Microsoft ODBC
+Driver 18 and the pipeline package installed. Build and start it with:
+
+```shell
+docker compose --profile airflow build airflow
+docker compose --profile airflow up -d --wait airflow
+```
+
+Confirm that Airflow imports the DAG and its two tasks without triggering a
+new batch:
+
+```shell
+docker compose --profile airflow exec -T airflow airflow dags list
+docker compose --profile airflow exec -T airflow \
+  airflow dags list-import-errors
+docker compose --profile airflow exec -T airflow \
+  airflow tasks list shopee_marketplace_quality
+```
+
+The UI is served on `http://localhost:8080` by default. The standalone runtime
+is intended only for local development; its metadata is stored separately from
+the pipeline's PostgreSQL analytical data.
+
 ## Challenges and Solutions
 
 This section will document real technical problems discovered during

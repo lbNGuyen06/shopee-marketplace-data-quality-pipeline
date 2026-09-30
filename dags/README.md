@@ -22,3 +22,30 @@ Optional scheduling variables:
 
 The DAG disables catchup and allows only one active DAG run so concurrent runs
 cannot race while resolving and committing the PostgreSQL watermark.
+
+## Local Airflow runtime
+
+The Compose `airflow` profile runs Airflow standalone for local development.
+It uses an isolated SQLite metadata database in the `airflow_data` volume; the
+pipeline continues to write analytical data to the PostgreSQL service.
+
+Build and start the runtime:
+
+```shell
+docker compose --profile airflow build airflow
+docker compose --profile airflow up -d --wait airflow
+```
+
+Validate the DAG without triggering a pipeline run:
+
+```shell
+docker compose --profile airflow exec -T airflow airflow dags list
+docker compose --profile airflow exec -T airflow \
+  airflow dags list-import-errors
+docker compose --profile airflow exec -T airflow \
+  airflow tasks list shopee_marketplace_quality
+```
+
+The local UI is available on port `8080` by default. Read the generated local
+administrator credentials from the Airflow container logs. Standalone mode is
+for local development and portfolio demonstration, not production deployment.
