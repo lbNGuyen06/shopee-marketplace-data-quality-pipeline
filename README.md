@@ -134,6 +134,19 @@ The UI is served on `http://localhost:8080` by default. The standalone runtime
 is intended only for local development; its metadata is stored separately from
 the pipeline's PostgreSQL analytical data.
 
+## Continuous Integration
+
+GitHub Actions runs two secret-free checks on every push and pull request:
+
+- Unit tests, DAG configuration tests, whitespace checks, and Docker Compose
+  validation on Python 3.13.
+- PostgreSQL initialization, the SQL smoke test, and the isolated PostgreSQL
+  ingestion integration test.
+
+The CI workflow uses synthetic PostgreSQL credentials and never connects to
+the real SQL Server source. The full SQL Server-to-PostgreSQL run remains an
+explicit local acceptance test because it requires private source credentials.
+
 ## Challenges and Solutions
 
 This section will document real technical problems discovered during
@@ -165,7 +178,8 @@ will use synthetic records only.
 - [x] Design ingestion and monitoring tables.
 - [x] Run PostgreSQL locally with Docker.
 - [x] Implement immutable batch ingestion.
-- [ ] Implement data-quality checks and reconciliation.
-- [ ] Implement overlapping incremental extraction.
-- [ ] Add Airflow orchestration.
-- [ ] Add CI and final portfolio documentation.
+- [x] Implement data-quality checks and reconciliation.
+- [x] Implement overlapping incremental extraction.
+- [x] Add Airflow orchestration.
+- [x] Add CI.
+- [ ] Complete final portfolio documentation.
