@@ -1,5 +1,7 @@
 # Shopee Marketplace Data Quality Pipeline
 
+[![CI](https://github.com/lbNGuyen06/shopee-marketplace-data-quality-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/lbNGuyen06/shopee-marketplace-data-quality-pipeline/actions/workflows/ci.yml)
+
 A reproducible batch pipeline that incrementally extracts anonymized Shopee
 operational records, preserves immutable source snapshots, validates data
 quality, monitors identifier collisions, and publishes source-health metrics
@@ -11,7 +13,8 @@ not report unique-order or customer-level metrics. Its primary purpose is
 reliable ingestion, observability, reconciliation, and privacy-aware data
 processing.
 
-> Project status: source profiling and data-contract design.
+> Project status: complete portfolio implementation with local orchestration,
+> automated quality controls, and CI validation.
 
 ## Business Problem
 
@@ -55,7 +58,7 @@ business order identifier.
 
 ## Reliability and Data Quality
 
-The pipeline will implement:
+The pipeline implements:
 
 - Incremental extraction using `synced_at` with a configurable overlap window.
 - Idempotent loading and safe reprocessing.
@@ -149,8 +152,42 @@ explicit local acceptance test because it requires private source credentials.
 
 ## Challenges and Solutions
 
-This section will document real technical problems discovered during
-implementation. It will not contain invented challenges.
+| Challenge | Implemented solution |
+| --------- | -------------------- |
+| Masked identifiers collide and cannot prove order-level uniqueness | Model immutable source observations with generated ingestion IDs; use deterministic record hashes only for content identity |
+| Incremental reads can miss late-arriving records | Extract by `synced_at` with an overlap window, deduplicate exact content in staging, and advance the watermark only after reconciliation succeeds |
+| The 84-column upstream schema can drift | Validate ordered column metadata against a versioned contract and persist a schema snapshot for every run |
+| Individual source rows can be malformed | Isolate rejected records with privacy-safe diagnostics while allowing valid observations in the same batch to continue |
+| Operational monitoring must not expose source PII | Emit structured batch-level logs and publish only aggregate health metrics |
+| Local orchestration and automated tests need different credentials | Run the full source acceptance test locally, while CI uses synthetic credentials and an isolated PostgreSQL instance |
+
+## Verified Outcomes
+
+- Profiled a changing 84-column source and documented why masked identifiers
+  cannot support trustworthy order, customer, or GMV metrics.
+- Implemented an end-to-end incremental path from schema validation and
+  extraction through immutable raw storage, staging, quality checks, and a
+  daily source-health mart.
+- Verified idempotency, reconciliation, rejected-record handling, schema
+  drift detection, freshness checks, collision monitoring, and watermark
+  safety through automated tests.
+- Ran the Airflow DAG successfully against the real source and local
+  PostgreSQL destination without publishing credentials or source records.
+- Validated every push and pull request through GitHub Actions using unit,
+  SQL smoke, Docker Compose, and PostgreSQL integration checks.
+
+## Repository Guide
+
+| Path | Responsibility |
+| ---- | -------------- |
+| `src/shopee_quality/` | Extraction, contracts, ingestion, quality rules, observability, reporting, and CLI code |
+| `sql/ddl/` | Initial PostgreSQL objects and ordered schema migrations |
+| `sql/profiling/` | Read-only source profiling queries |
+| `sql/tests/` | PostgreSQL smoke tests |
+| `dags/` | Airflow orchestration entry point |
+| `tests/unit/` | Fast deterministic behavior tests |
+| `tests/integration/` | PostgreSQL and private source acceptance tests |
+| `docs/` | Architecture, source evidence, and record-hash contract |
 
 ## Privacy
 
@@ -182,4 +219,4 @@ will use synthetic records only.
 - [x] Implement overlapping incremental extraction.
 - [x] Add Airflow orchestration.
 - [x] Add CI.
-- [ ] Complete final portfolio documentation.
+- [x] Complete final portfolio documentation.
